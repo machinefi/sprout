@@ -7,6 +7,8 @@ import (
 )
 
 type Instance interface {
+	Start() error
+	Stop()
 	Execute(ctx context.Context, msg *msg.Msg) ([]byte, error)
 	Release()
 }

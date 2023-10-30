@@ -2,9 +2,12 @@ package risc0
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/machinefi/w3bstream-mainnet/pkg/msg"
@@ -14,6 +17,11 @@ import (
 type instance struct {
 	conn *grpc.ClientConn
 	resp *CreateResponse
+
+	started  atomic.Bool
+	refCount atomic.Int32
+	stopCond *sync.Cond
+	locker   *sync.Mutex
 }
 
 func NewInstance(ctx context.Context, grpcAddr string, msgKey msg.MsgKey, executeBinary []byte, expParam string) (instanceapi.Instance, error) {
@@ -48,6 +56,34 @@ func (i *instance) Execute(ctx context.Context, msg *msg.Msg) ([]byte, error) {
 	return resp.Result, nil
 }
 
+func (i *instance) Acquire() bool {
+	i.locker.Lock()
+	defer i.locker.Unlock()
+
+	if !i.started.Load() || i.conn == nil || i.conn.GetState() != connectivity.Ready {
+		// TODO should do reconnection?
+		return false
+	}
+	i.refCount.Add(1)
+	return true
+}
+
 func (i *instance) Release() {
-	i.conn.Close()
+	i.locker.Lock()
+
+	i.refCount.Add(-1)
+	if i.refCount.Load() <= 0 {
+		i.stopCond.Broadcast()
+	}
+
+	i.locker.Unlock()
+}
+
+func (i *instance) Start() error {
+	// TODO create grpc connection and reset instance state
+	return nil
+}
+
+func (i *instance) Stop() {
+	// TODO wait stopCond, then stop and release connection
 }
