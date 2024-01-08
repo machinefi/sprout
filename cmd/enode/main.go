@@ -35,7 +35,7 @@ func main() {
 	go dispatcher.Dispatch()
 
 	go func() {
-		if err := api.NewHttpServer(pg).Run(viper.GetString(HttpServiceEndpoint)); err != nil {
+		if err := api.NewHttpServer(pg, viper.GetString(DIDAuthServerEndpoint)).Run(viper.GetString(HttpServiceEndpoint)); err != nil {
 			log.Fatal(err)
 		}
 	}()

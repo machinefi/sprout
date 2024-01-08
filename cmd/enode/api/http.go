@@ -1,8 +1,10 @@
 package api
 
 import (
+	"github.com/machinefi/sprout/auth/didvc"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -45,12 +47,15 @@ type queryMessageStateLogResp struct {
 type HttpServer struct {
 	engine *gin.Engine
 	pg     *persistence.Postgres
+	// didAuthServer did auth server endpoint
+	didAuthServer string
 }
 
-func NewHttpServer(pg *persistence.Postgres) *HttpServer {
+func NewHttpServer(pg *persistence.Postgres, didAuthServer string) *HttpServer {
 	s := &HttpServer{
-		engine: gin.Default(),
-		pg:     pg,
+		engine:        gin.Default(),
+		pg:            pg,
+		didAuthServer: didAuthServer,
 	}
 
 	s.engine.POST("/message", s.handleMessage)
@@ -72,6 +77,20 @@ func (s *HttpServer) handleMessage(c *gin.Context) {
 	if err := c.ShouldBindJSON(req); err != nil {
 		c.JSON(http.StatusBadRequest, newErrResp(err))
 		return
+	}
+
+	tok := c.GetHeader("Authorization")
+	if tok == "" {
+		tok = c.Query("authorization")
+	}
+	tok = strings.TrimSpace(strings.Replace(tok, "Bearer", " ", 1))
+
+	if tok != "" {
+		err := didvc.VerifyJWTCredential(s.didAuthServer, tok)
+		if err != nil {
+			c.String(http.StatusUnauthorized, err.Error())
+			return
+		}
 	}
 
 	id := uuid.NewString()

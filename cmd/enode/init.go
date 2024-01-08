@@ -21,4 +21,5 @@ func bindEnvConfig() {
 	viper.MustBindEnv(ChainEndpoint)
 	viper.MustBindEnv(ProjectContractAddress)
 	viper.MustBindEnv(ProjectFileDirectory)
+	viper.MustBindEnv(DIDAuthServerEndpoint)
 }
