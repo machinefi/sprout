@@ -10,6 +10,20 @@ type Message struct {
 	Data           string `json:"data"`
 }
 
+func (m *Message) GetData() *MessageData {
+	return &MessageData{
+		Data: m.Data,
+	}
+}
+
+type MessageData struct {
+	Data string
+}
+
+func (m *MessageData) Serialize() ([]byte, error) {
+	return []byte(m.Data), nil
+}
+
 type MessageWithTime struct {
 	Message
 	CreatedAt time.Time

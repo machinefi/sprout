@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -138,6 +139,11 @@ func (p *Postgres) FetchByID(taskID string) (*types.Task, error) {
 	if len(ms) == 0 {
 		return nil, errors.Errorf("missing message, taskID %s", taskID)
 	}
+
+	sort.Slice(ms, func(i, j int) bool {
+		return ms[i].ID <= ms[j].ID
+	})
+
 	tms := []*types.Message{}
 	for _, m := range ms {
 		tms = append(tms, &types.Message{

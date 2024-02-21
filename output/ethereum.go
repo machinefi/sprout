@@ -15,6 +15,8 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/pkg/errors"
 	"github.com/tidwall/gjson"
+	"github.com/txaty/go-merkletree"
+	"golang.org/x/crypto/sha3"
 
 	"github.com/machinefi/sprout/types"
 )
@@ -44,6 +46,27 @@ func (e *ethereumContract) Output(task *types.Task, proof []byte) (string, error
 				return "", errors.Wrap(err, "proof decode failed")
 			}
 			params = append(params, p)
+			continue
+		}
+		if a.Name == "merkle_root" {
+			bs := make([]merkletree.DataBlock, 0, len(task.Messages))
+			for _, m := range task.Messages {
+				bs = append(bs, m.GetData())
+			}
+
+			tree, err := merkletree.New(&merkletree.Config{
+				Mode:             merkletree.ModeTreeBuild,
+				SortSiblingPairs: true,
+				HashFunc: func(b []byte) ([]byte, error) {
+					sha := sha3.NewLegacyKeccak256()
+					sha.Write(b)
+					return sha.Sum(nil), nil
+				},
+			}, bs)
+			if err != nil {
+				return "", errors.Wrap(err, "build merkletree failed")
+			}
+			params = append(params, tree.Root)
 			continue
 		}
 		value := gjson.Get(m.Data, a.Name)
