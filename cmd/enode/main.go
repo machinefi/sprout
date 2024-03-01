@@ -5,7 +5,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/facebookgo/clock"
 	"github.com/spf13/viper"
 
 	"github.com/machinefi/sprout/clients"
@@ -31,7 +33,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	dispatcher, err := task.NewDispatcher(pg, projectManager, viper.GetString(BootNodeMultiaddr), viper.GetString(OperatorPrivateKey), viper.GetString(OperatorPrivateKeyED25519), viper.GetInt(IotexChainID))
+	dispatcher, err := task.NewDispatcher(clock.New().Ticker(3*time.Second), pg, projectManager, viper.GetString(BootNodeMultiaddr), viper.GetString(OperatorPrivateKey), viper.GetString(OperatorPrivateKeyED25519), viper.GetInt(IotexChainID))
 	if err != nil {
 		log.Fatal(err)
 	}

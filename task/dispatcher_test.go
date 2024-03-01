@@ -6,6 +6,7 @@ import (
 	"time"
 
 	. "github.com/agiledragon/gomonkey/v2"
+	"github.com/facebookgo/clock"
 	"github.com/golang/mock/gomock"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
@@ -25,14 +26,17 @@ func TestNewDispatcher(t *testing.T) {
 
 	t.Run("NewFailed", func(t *testing.T) {
 		patches = testp2p.P2pNewPubSubs(patches, nil, errors.New(t.Name()))
-		_, err := NewDispatcher(nil, nil, "", "", "", 0)
+		_, err := NewDispatcher(clock.New().Ticker(3*time.Second), nil, nil, "", "", "", 0)
 		require.ErrorContains(err, t.Name())
 	})
 	patches = testp2p.P2pNewPubSubs(patches, nil, nil)
 
 	t.Run("New", func(t *testing.T) {
-		_, err := NewDispatcher(nil, nil, "", "", "", 0)
+		mc := clock.NewMock()
+		ticker := mc.Ticker(3 * time.Second)
+		_, err := NewDispatcher(ticker, nil, nil, "", "", "", 0)
 		require.NoError(err)
+		// TODO: more test for dispatcher
 	})
 }
 

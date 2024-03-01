@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/facebookgo/clock"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 
 	"github.com/machinefi/sprout/p2p"
@@ -19,14 +20,31 @@ type Dispatcher struct {
 	projectManager            *project.Manager
 	operatorPrivateKeyECDSA   string
 	operatorPrivateKeyED25519 string
+	ticker                    *clock.Ticker
 }
 
-// will block caller
-func (d *Dispatcher) Dispatch() {
-	ticker := time.NewTicker(3 * time.Second)
-	defer ticker.Stop()
+func NewDispatcher(ticker *clock.Ticker, pg *persistence.Postgres, projectManager *project.Manager, bootNodeMultiaddr, operatorPrivateKey, operatorPrivateKeyED25519 string, iotexChainID int) (*Dispatcher, error) {
+	d := &Dispatcher{
+		ticker:                    ticker,
+		pg:                        pg,
+		projectManager:            projectManager,
+		operatorPrivateKeyECDSA:   operatorPrivateKey,
+		operatorPrivateKeyED25519: operatorPrivateKeyED25519,
+	}
+	ps, err := p2p.NewPubSubs(d.handleP2PData, bootNodeMultiaddr, iotexChainID)
+	if err != nil {
+		return nil, err
+	}
+	d.pubSubs = ps
 
-	for range ticker.C {
+	return d, nil
+}
+
+// Dispatch dispatches tasks
+func (d *Dispatcher) Dispatch() {
+	defer d.ticker.Stop()
+
+	for range d.ticker.C {
 		t, err := d.pg.Fetch()
 		if err != nil {
 			slog.Error("get task failed", "error", err)
@@ -36,6 +54,7 @@ func (d *Dispatcher) Dispatch() {
 			continue
 		}
 
+		// TODO: check len of messages
 		projectID := t.Messages[0].ProjectID
 		if err := d.pubSubs.Add(projectID); err != nil {
 			slog.Error("add project pubsub failed", "error", err, "projectID", projectID)
@@ -100,20 +119,4 @@ func (d *Dispatcher) handleP2PData(data *p2p.Data, topic *pubsub.Topic) {
 	if err := d.pg.UpdateState(l.TaskID, types.TaskStateOutputted, fmt.Sprintf("output result: %s", outRes), time.Now()); err != nil {
 		slog.Error("update task state to outputted failed", "error", err, "taskID", l.TaskID)
 	}
-}
-
-func NewDispatcher(pg *persistence.Postgres, projectManager *project.Manager, bootNodeMultiaddr, operatorPrivateKey, operatorPrivateKeyED25519 string, iotexChainID int) (*Dispatcher, error) {
-	d := &Dispatcher{
-		pg:                        pg,
-		projectManager:            projectManager,
-		operatorPrivateKeyECDSA:   operatorPrivateKey,
-		operatorPrivateKeyED25519: operatorPrivateKeyED25519,
-	}
-	ps, err := p2p.NewPubSubs(d.handleP2PData, bootNodeMultiaddr, iotexChainID)
-	if err != nil {
-		return nil, err
-	}
-	d.pubSubs = ps
-
-	return d, nil
 }
