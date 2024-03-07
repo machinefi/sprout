@@ -6,10 +6,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	solanaTypes "github.com/blocto/solana-go-sdk/types"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 
 	"github.com/machinefi/sprout/clients"
@@ -50,24 +46,4 @@ func main() {
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
 	<-done
-}
-
-func getENodeConfig() (*api.ENodeConfigResp, error) {
-	enodeConf := &api.ENodeConfigResp{ProjectContractAddress: viper.GetString(ProjectContractAddress)}
-
-	if len(viper.GetString(OperatorPrivateKey)) > 0 {
-		pk := crypto.ToECDSAUnsafe(common.FromHex(viper.GetString(OperatorPrivateKey)))
-		sender := crypto.PubkeyToAddress(pk.PublicKey)
-		enodeConf.OperatorETHAddress = sender.String()
-	}
-
-	if len(viper.GetString(OperatorPrivateKeyED25519)) > 0 {
-		wallet, err := solanaTypes.AccountFromHex(viper.GetString(OperatorPrivateKeyED25519))
-		if err != nil {
-			return nil, errors.Wrap(err, "get solana wallet failed")
-		}
-		enodeConf.OperatorSolanaAddress = wallet.PublicKey.String()
-	}
-
-	return enodeConf, nil
 }

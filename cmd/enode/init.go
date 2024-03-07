@@ -4,7 +4,13 @@ import (
 	"log/slog"
 	"os"
 
+	solanaTypes "github.com/blocto/solana-go-sdk/types"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/pkg/errors"
 	"github.com/spf13/viper"
+
+	"github.com/machinefi/sprout/cmd/enode/api"
 )
 
 func initLogger() {
@@ -35,4 +41,24 @@ func initConfig() {
 	viper.BindEnv(OperatorPrivateKey)
 	viper.BindEnv(OperatorPrivateKeyED25519)
 	viper.BindEnv(ProjectFileDirectory)
+}
+
+func getENodeConfig() (*api.ENodeConfigResp, error) {
+	enodeConf := &api.ENodeConfigResp{ProjectContractAddress: viper.GetString(ProjectContractAddress)}
+
+	if len(viper.GetString(OperatorPrivateKey)) > 0 {
+		pk := crypto.ToECDSAUnsafe(common.FromHex(viper.GetString(OperatorPrivateKey)))
+		sender := crypto.PubkeyToAddress(pk.PublicKey)
+		enodeConf.OperatorETHAddress = sender.String()
+	}
+
+	if len(viper.GetString(OperatorPrivateKeyED25519)) > 0 {
+		wallet, err := solanaTypes.AccountFromHex(viper.GetString(OperatorPrivateKeyED25519))
+		if err != nil {
+			return nil, errors.Wrap(err, "get solana wallet failed")
+		}
+		enodeConf.OperatorSolanaAddress = wallet.PublicKey.String()
+	}
+
+	return enodeConf, nil
 }
