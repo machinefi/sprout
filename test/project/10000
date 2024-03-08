@@ -4,7 +4,16 @@
     "codeExpParam": "{\"image_id\":\"RANGE_ID\", \"elf\":\"RANGE_ELF\"}",
     "vmType": "risc0",
     "output": {
-      "type": "stdout"
+      "type": "ethereumContract",
+      "ethereum": {
+        "chainEndpoint": "https://babel-api.testnet.iotex.io",
+        "contractAddress": "0x5Ea91218CB1E329806a746E0816A8BD533637b42",
+        "contractMethod": "setProof",
+        "contractAbiJSON": "[{\"constant\":false,\"inputs\":[{\"internalType\":\"bytes\",\"name\":\"proof\",\"type\":\"bytes\"}],\"name\":\"setProof\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"constant\":true,\"inputs\":[],\"name\":\"getProof\",\"outputs\":[{\"internalType\":\"bytes\",\"name\":\"\",\"type\":\"bytes\"}],\"payable\":false,\"stateMutability\":\"view\",\"type\":\"function\"}]"
+      }
+    },
+    "aggregation": {
+      "amount": 3
     },
     "version": "0.1"
   }
