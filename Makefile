@@ -33,9 +33,9 @@ didkit_test:
 risc0_test:
 	docker run --name risc0_test \
   --platform linux/x86_64 \
-  -e DATABASE_URL=postgres://test_user:test_passwd@localhost:15432/test?sslmode=disable \
-  -e BONSAI_URL: https://api.bonsai.xyz} \
-  -e BONSAI_KEY= xxx \
+  -e DATABASE_URL='postgres://test_user:test_passwd@localhost:15432/test?sslmode=disable' \
+  -e BONSAI_URL=https://api.bonsai.xyz \
+  -e BONSAI_KEY=xxx \
   -p 14001:4001 \
   -d wangweixiaohao2944/risc0server:v1.0.0.rc2
 
@@ -49,9 +49,9 @@ halo2_test:
 .PHONY: zkwasm_test
 zkwasm_test:
 	docker run --name zkwasm_test \
-	--platform linux/x86_64 \
-	-p 14003:4003 \
-	-d iotexdev/zkwasmserver:v0.0.3
+  --platform linux/x86_64 \
+  -p 14003:4003 \
+  -d iotexdev/zkwasmserver:v0.0.3
 
 integration_test: integration_test_depends
-	@cd cmd/test/ && go test ./... -v
+	@cd cmd/tests/ && go test ./... -v
