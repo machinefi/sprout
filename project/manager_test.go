@@ -1,9 +1,12 @@
 package project
 
 import (
+	"context"
 	"encoding/json"
 	"os"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/agiledragon/gomonkey/v2"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -18,56 +21,75 @@ import (
 )
 
 func TestNewManager(t *testing.T) {
-	t.SkipNow() // TODO @zhiwei try to fix this test
-
 	r := require.New(t)
-	p := gomonkey.NewPatches()
-	defer p.Reset()
 
-	t.Run("FailedToDialChain", func(t *testing.T) {
-		p = p.ApplyFuncReturn(ethclient.Dial, nil, errors.New(t.Name()))
+	t.Run("FillProjectFromContractIfContractAddressIsValid", func(t *testing.T) {
+		t.Run("EmptyContractAddress", func(t *testing.T) {
+			_, err := NewManager("", "", "", "")
+			r.Nil(err)
+		})
 
-		_, err := NewManager("", "", "", "")
-		r.ErrorContains(err, t.Name())
-	})
-	p = p.ApplyFuncReturn(ethclient.Dial, ethclient.NewClient(&rpc.Client{}), nil)
+		t.Run("ValidContractAddress", func(t *testing.T) {
+			t.Run("DailEth", func(t *testing.T) {
+				t.Run("FailedToDialChain", func(t *testing.T) {
+					p := gomonkey.NewPatches()
+					defer p.Reset()
 
-	t.Run("FailedToNewContracts", func(t *testing.T) {
-		p = p.ApplyFuncReturn(contracts.NewContracts, nil, errors.New(t.Name()))
+					p = p.ApplyFuncReturn(ethclient.Dial, nil, errors.New(t.Name()))
 
-		_, err := NewManager("", "", "", "")
-		r.ErrorContains(err, t.Name())
-	})
-	p = p.ApplyFuncReturn(contracts.NewContracts, nil, nil)
+					_, err := NewManager("any", "any", "any", "any")
+					r.ErrorContains(err, t.Name())
+				})
+			})
 
-	t.Run("FailedToNewDefaultMonitor", func(t *testing.T) {
-		p = p.ApplyPrivateMethod(&Manager{}, "fillProjectPool", func(string) {})
-		p = p.ApplyFuncReturn(NewDefaultMonitor, nil, errors.New(t.Name()))
+			t.Run("NewContractInstance", func(t *testing.T) {
+				p := gomonkey.NewPatches()
+				defer p.Reset()
 
-		_, err := NewManager("", "", "", "")
-		r.ErrorContains(err, t.Name())
-	})
-	p = p.ApplyFuncReturn(NewDefaultMonitor, &Monitor{}, nil)
+				p = p.ApplyFuncReturn(ethclient.Dial, ethclient.NewClient(&rpc.Client{}), nil)
 
-	t.Run("Success", func(t *testing.T) {
-		p = p.ApplyPrivateMethod(&Monitor{}, "run", func() {})
-		p = p.ApplyMethodReturn(&Monitor{}, "MustEvents", make(chan *types.Log))
-		p = p.ApplyPrivateMethod(&Manager{}, "watchProjectRegistrar", func(<-chan *types.Log, event.Subscription) {})
+				t.Run("FailedToNewContracts", func(t *testing.T) {
+					p = p.ApplyFuncReturn(contracts.NewContracts, nil, errors.New(t.Name()))
 
-		_, err := NewManager("", "", "", "")
-		r.NoError(err)
+					_, err := NewManager("any", "any", "any", "any")
+					r.ErrorContains(err, t.Name())
+				})
+			})
+
+			t.Run("FillProjectFromContract", func(t *testing.T) {
+				p := gomonkey.NewPatches()
+				defer p.Reset()
+
+				p = p.ApplyFuncReturn(ethclient.Dial, ethclient.NewClient(&rpc.Client{}), nil)
+				p = p.ApplyFuncReturn(contracts.NewContracts, &contracts.Contracts{}, nil)
+				p = p.ApplyPrivateMethod(&Manager{}, "fillProjectPoolFromContract", func(_ *Manager) {})
+
+				t.Run("FailedToNewContractMonitor", func(t *testing.T) {
+					p = p.ApplyFuncReturn(NewDefaultMonitor, nil, errors.New(t.Name()))
+
+					_, err := NewManager("any", "any", "any", "any")
+					r.ErrorContains(err, t.Name())
+				})
+
+				t.Run("StartMonitorAndWatchProjectRegistrar", func(t *testing.T) {
+					t.Skipf("skip because go routine cannot mock")
+					p = p.ApplyFuncReturn(NewDefaultMonitor, &Monitor{}, nil)
+					p = p.ApplyPrivateMethod(&Monitor{}, "run", func(_ *Monitor) {
+						time.Sleep(time.Second)
+						return
+					})
+					p = p.ApplyPrivateMethod(&Manager{}, "watchProjectRegistrar", func(_ *Monitor, _ <-chan *types.Log, subscription event.Subscription) {
+						time.Sleep(time.Second)
+						return
+					})
+
+					_, err := NewManager("any", "any", "any", "any")
+					r.ErrorContains(err, t.Name())
+				})
+			})
+		})
 	})
 }
-
-type testSubscription struct {
-	errChain chan error
-}
-
-func (s testSubscription) Err() <-chan error {
-	return s.errChain
-}
-
-func (s testSubscription) Unsubscribe() {}
 
 func TestManager_Get(t *testing.T) {
 	r := require.New(t)
@@ -89,10 +111,14 @@ func TestManager_Get(t *testing.T) {
 func TestManager_Set(t *testing.T) {
 	t.Run("Success", func(t *testing.T) {
 		m := &Manager{
-			pool:       map[key]*Config{},
+			pool: map[key]*Config{
+				getKey(1, "0.1"): {},
+				getKey(2, "0.2"): {},
+			},
 			projectIDs: map[uint64]bool{},
 		}
 		m.Set(1, "0.1", &Config{})
+		m.Set(2, "0.2", &Config{})
 	})
 }
 
@@ -124,31 +150,145 @@ func TestManager_GetNotify(t *testing.T) {
 	})
 }
 
-func TestManager_doProjectRegistrarWatch(t *testing.T) {
+func TestManager_onContractEvent(t *testing.T) {
 	r := require.New(t)
+
+	m := &Manager{
+		mux:          sync.Mutex{},
+		pool:         make(map[key]*Config),
+		projectIDs:   make(map[uint64]bool),
+		instance:     &contracts.Contracts{},
+		ipfsEndpoint: "any",
+		notify:       make(chan uint64, 1),
+	}
+
+	t.Run("ParseContractLog", func(t *testing.T) {
+		t.Run("FailedToParseProjectUpsertedLog", func(t *testing.T) {
+			p := gomonkey.NewPatches()
+			defer p.Reset()
+
+			p = p.ApplyMethodReturn(&contracts.ContractsFilterer{}, "ParseProjectUpserted", nil, errors.New(t.Name()))
+
+			err := m.onContractEvent(&types.Log{})
+			r.ErrorContains(err, t.Name())
+		})
+	})
+
+	t.Run("CheckEventValid", func(t *testing.T) {
+		t.Run("InvalidProjectID", func(t *testing.T) {
+			p := gomonkey.NewPatches()
+			defer p.Reset()
+
+			p = p.ApplyMethodReturn(&contracts.ContractsFilterer{}, "ParseProjectUpserted", &contracts.ContractsProjectUpserted{
+				ProjectId: 0,
+			}, nil)
+
+			err := m.onContractEvent(&types.Log{})
+			r.Equal(err, ErrInvalidProjectID)
+		})
+	})
+
+	t.Run("FetchProject", func(t *testing.T) {
+		t.Run("FailedToGetProjectConfig", func(t *testing.T) {
+			p := gomonkey.NewPatches()
+			defer p.Reset()
+
+			p = p.ApplyMethodReturn(&contracts.ContractsFilterer{}, "ParseProjectUpserted", &contracts.ContractsProjectUpserted{
+				ProjectId: 1,
+				Uri:       "any",
+				Hash:      [32]byte{},
+			}, nil)
+			p = p.ApplyMethodReturn(&ProjectMeta{}, "GetConfigs", nil, errors.New(t.Name()))
+
+			err := m.onContractEvent(&types.Log{})
+			r.ErrorContains(err, t.Name())
+		})
+	})
+
+	t.Run("UpdateProjectPool", func(t *testing.T) {
+		p := gomonkey.NewPatches()
+		defer p.Reset()
+
+		p = p.ApplyMethodReturn(&contracts.ContractsFilterer{}, "ParseProjectUpserted", &contracts.ContractsProjectUpserted{
+			ProjectId: 100,
+			Uri:       "any",
+			Hash:      [32]byte{},
+		}, nil)
+		p = p.ApplyMethodReturn(&ProjectMeta{}, "GetConfigs", []*Config{
+			{
+				Code:         "any",
+				CodeExpParam: "any",
+				VMType:       "any",
+				Output:       OutputConfig{},
+				Aggregation:  AggregationConfig{},
+				Version:      "0.1",
+			},
+		}, nil)
+
+		err := m.onContractEvent(&types.Log{})
+		r.NoError(err)
+		nc := m.GetNotify()
+		r.Equal(len(nc), 1)
+		r.Equal(<-nc, uint64(100))
+	})
+}
+
+func newMockSubscription() *mockSubscription {
+	sub := &mockSubscription{
+		errChain: make(chan error),
+	}
+	sub.ctx, sub.cancel = context.WithCancel(context.Background())
+	return sub
+}
+
+type mockSubscription struct {
+	errChain chan error
+	ctx      context.Context
+	cancel   context.CancelFunc
+}
+
+func (s *mockSubscription) Err() <-chan error {
+	return s.errChain
+}
+
+func (s *mockSubscription) Unsubscribe() {
+	s.cancel()
+	s.errChain <- s.ctx.Err()
+}
+
+func TestManager_watchProjectRegistrar(t *testing.T) {
+	r := require.New(t)
+
 	p := gomonkey.NewPatches()
 	defer p.Reset()
 
-	t.Run("Success", func(t *testing.T) {
-		p = p.ApplyMethodReturn(&contracts.ContractsFilterer{}, "ParseProjectUpserted", &contracts.ContractsProjectUpserted{ProjectId: 1}, nil)
-		p = p.ApplyMethodReturn(&ProjectMeta{}, "GetConfigs", []*Config{{}}, nil)
+	m := &Manager{}
 
-		m := &Manager{
-			projectIDs: map[uint64]bool{},
-			pool:       map[key]*Config{},
-			notify:     make(chan uint64, 1),
-			instance:   &contracts.Contracts{},
+	times := -1
+	p = p.ApplyPrivateMethod(&Manager{}, "onContractEvent", func(_ *Manager, _ *types.Log) error {
+		times++
+		if times%2 == 0 {
+			return errors.New("any")
 		}
-
-		errChain := make(chan error)
-		logChain := make(chan *types.Log, 1)
-		logChain <- &types.Log{}
-
-		m.doProjectRegistrarWatch(logChain, testSubscription{errChain})
-		notify := m.GetNotify()
-		d := <-notify
-		r.Equal(d, uint64(1))
+		return nil
 	})
+
+	logs := make(chan *types.Log, 1)
+	subs := newMockSubscription()
+
+	var err error
+	go func() {
+		err = m.watchProjectRegistrar(logs, subs)
+	}()
+
+	logs <- &types.Log{}
+	time.Sleep(time.Millisecond * 200)
+	logs <- &types.Log{}
+	time.Sleep(time.Millisecond * 200)
+	subs.Unsubscribe()
+	time.Sleep(time.Millisecond * 200)
+
+	r.Error(err)
 }
 
 func TestManager_fillProjectPoolFromContract(t *testing.T) {
@@ -366,23 +506,6 @@ func TestManager_fillProjectPoolFromLocal(t *testing.T) {
 			pool:       map[key]*Config{},
 		}
 		m.fillProjectPoolFromLocal("test")
-		r.Equal(len(m.GetAllProjectID()), 0)
-	})
-}
-
-func TestManager_fillProjectPool(t *testing.T) {
-	r := require.New(t)
-	p := gomonkey.NewPatches()
-	defer p.Reset()
-
-	t.Run("Success", func(t *testing.T) {
-		p = p.ApplyPrivateMethod(&Manager{}, "fillProjectPoolFromContract", func() {})
-		p = p.ApplyPrivateMethod(&Manager{}, "fillProjectPoolFromLocal", func(string) {})
-
-		m := &Manager{
-			projectIDs: map[uint64]bool{},
-		}
-		m.fillProjectPool("")
 		r.Equal(len(m.GetAllProjectID()), 0)
 	})
 }

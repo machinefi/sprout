@@ -7,13 +7,13 @@ import (
 	"github.com/machinefi/sprout/types"
 )
 
-type stdout struct{}
+type Stdout struct{}
 
-func (r *stdout) Output(task *types.Task, proof []byte) (string, error) {
+func (r *Stdout) Output(task *types.Task, proof []byte) (string, error) {
 	slog.Info("stdout", "proof", hex.EncodeToString(proof))
 	return "", nil
 }
 
 func NewStdout() Output {
-	return &stdout{}
+	return &Stdout{}
 }

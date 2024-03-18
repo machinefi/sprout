@@ -22,13 +22,13 @@ import (
 	"github.com/machinefi/sprout/types"
 )
 
-type textileDB struct {
+type TextileDB struct {
 	endpoint  string
 	secretKey *ecdsa.PrivateKey
 }
 
-func (t *textileDB) Output(task *types.Task, proof []byte) (string, error) {
-	slog.Debug("outputing to textileDB", "chain endpoint", t.endpoint)
+func (t *TextileDB) Output(task *types.Task, proof []byte) (string, error) {
+	slog.Debug("outputing to TextileDB", "chain endpoint", t.endpoint)
 	encodedData, err := t.packData(proof)
 	if err != nil {
 		return "", err
@@ -40,7 +40,7 @@ func (t *textileDB) Output(task *types.Task, proof []byte) (string, error) {
 	return txHash, nil
 }
 
-func (t *textileDB) packData(proof []byte) ([]byte, error) {
+func (t *TextileDB) packData(proof []byte) ([]byte, error) {
 	proof, err := hex.DecodeString(string(proof))
 	valueJournal := gjson.GetBytes(proof, "Stark.journal.bytes")
 	//valueJournal := gjson.GetBytes(proof, "Snark.journal")
@@ -66,7 +66,7 @@ func (t *textileDB) packData(proof []byte) ([]byte, error) {
 	return jsonData, nil
 }
 
-func (t *textileDB) write(data []byte) (string, error) {
+func (t *TextileDB) write(data []byte) (string, error) {
 	signatureBytes, err := signing.NewSigner(t.secretKey).SignBytes(data)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to sign data")
@@ -115,7 +115,7 @@ func NewTextileDBAdapter(vaultID string, secretKey string) (Output, error) {
 
 	pk := crypto.ToECDSAUnsafe(common.FromHex(secretKey))
 
-	return &textileDB{
+	return &TextileDB{
 		endpoint:  fmt.Sprintf("https://basin.tableland.xyz/vaults/%s/events", vaultID),
 		secretKey: pk,
 	}, nil

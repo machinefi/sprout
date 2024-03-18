@@ -117,7 +117,8 @@ func (m *ProjectMeta) GetConfigs(ipfsEndpoint string) ([]*Config, error) {
 	if _, err := h.Write(content); err != nil {
 		return nil, errors.Wrap(err, "generate project config hash failed")
 	}
-	if !bytes.Equal(h.Sum(nil), m.Hash[:]) {
+	sum := h.Sum(nil)
+	if !bytes.Equal(sum, m.Hash[:]) {
 		return nil, errors.New("validate project config hash failed")
 	}
 

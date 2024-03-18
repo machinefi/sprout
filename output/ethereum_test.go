@@ -128,7 +128,7 @@ func TestEthereumContract_Output(t *testing.T) {
 func TestEthereumContract_SendTX(t *testing.T) {
 	r := require.New(t)
 
-	contract := &ethereumContract{}
+	contract := &EthereumContract{}
 	ctx := context.Background()
 
 	t.Run("DialEthFailed", func(t *testing.T) {

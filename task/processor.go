@@ -85,6 +85,19 @@ func (r *Processor) Run() {
 	// TODO project load & delete
 }
 
+func (r *Processor) monitorProjectRegistrar(notifier <-chan uint64) {
+	for {
+		select {
+		case projectID := <-notifier:
+			if err := r.ps.Add(projectID); err != nil {
+				slog.Error("add project pubsub failed", "projectID", projectID, "error", err)
+				continue
+			}
+			slog.Debug("processor project added", "projectID", projectID)
+		}
+	}
+}
+
 func NewProcessor(vmHandler *vm.Handler, projectManager *project.Manager, bootNodeMultiaddr string, iotexChainID int) (*Processor, error) {
 	p := &Processor{
 		vmHandler:      vmHandler,
@@ -104,15 +117,7 @@ func NewProcessor(vmHandler *vm.Handler, projectManager *project.Manager, bootNo
 		slog.Debug("processor project added", "projectID", id)
 	}
 
-	notify := projectManager.GetNotify()
-	go func() {
-		for id := range notify {
-			if err := ps.Add(id); err != nil {
-				slog.Error("add project pubsub failed", "projectID", id, "error", err)
-			}
-			slog.Debug("processor project added", "projectID", id)
-		}
-	}()
+	go p.monitorProjectRegistrar(projectManager.GetNotify())
 
 	return p, nil
 }

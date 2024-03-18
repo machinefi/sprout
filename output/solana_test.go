@@ -31,7 +31,7 @@ func TestSolanaProgram_Output(t *testing.T) {
 	patches := NewPatches()
 	defer patches.Reset()
 
-	contract := &solanaProgram{}
+	contract := &SolanaProgram{}
 
 	t.Run("SendTXFailed", func(t *testing.T) {
 		patches = solanaProgramPackInstructions(patches, nil)
@@ -54,7 +54,7 @@ func TestSolanaProgram_SendTX(t *testing.T) {
 	defer patches.Reset()
 
 	secretKey := "fd6ac80f1b9886a6d157cd8e71f842a63c52ebd237cf48fba03ae587e197d511f0b2439ae6da236d26f17f56c68f05d48513cd99b33143fa0b1aec7838ce4276"
-	contract := &solanaProgram{}
+	contract := &SolanaProgram{}
 	ins := contract.packInstructions([]byte("proof"))
 
 	t.Run("MissingInstructionData", func(t *testing.T) {
@@ -94,7 +94,7 @@ func TestSolanaProgram_SendTX(t *testing.T) {
 
 func solanaProgramPackInstructions(p *Patches, instructions []soltypes.Instruction) *Patches {
 	return p.ApplyPrivateMethod(
-		&solanaProgram{},
+		&SolanaProgram{},
 		"packInstructions",
 		func(proof []byte) []soltypes.Instruction {
 			return instructions
@@ -104,7 +104,7 @@ func solanaProgramPackInstructions(p *Patches, instructions []soltypes.Instructi
 
 func solanaProgramSendTX(p *Patches, hash string, err error) *Patches {
 	return p.ApplyPrivateMethod(
-		&solanaProgram{},
+		&SolanaProgram{},
 		"sendTX",
 		func(endpoint, privateKey string, ins []soltypes.Instruction) (string, error) {
 			return hash, err

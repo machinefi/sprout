@@ -14,14 +14,14 @@ import (
 	"github.com/machinefi/sprout/types"
 )
 
-type solanaProgram struct {
+type SolanaProgram struct {
 	endpoint       string
 	programID      string
 	secretKey      string
 	stateAccountPK string
 }
 
-func (e *solanaProgram) Output(task *types.Task, proof []byte) (string, error) {
+func (e *SolanaProgram) Output(task *types.Task, proof []byte) (string, error) {
 	slog.Debug("outputing to solana program", "chain endpoint", e.endpoint)
 	ins := e.packInstructions(proof)
 	txHash, err := e.sendTX(e.endpoint, e.secretKey, ins)
@@ -32,7 +32,7 @@ func (e *solanaProgram) Output(task *types.Task, proof []byte) (string, error) {
 	return txHash, nil
 }
 
-func (e *solanaProgram) sendTX(endpoint, privateKey string, ins []soltypes.Instruction) (string, error) {
+func (e *SolanaProgram) sendTX(endpoint, privateKey string, ins []soltypes.Instruction) (string, error) {
 	cli := client.NewClient(endpoint)
 	b := common.FromHex(privateKey)
 	pk := ed25519.PrivateKey(b)
@@ -71,14 +71,14 @@ func (e *solanaProgram) sendTX(endpoint, privateKey string, ins []soltypes.Instr
 // the first byte is the instruction, which is 0 for now;
 // the rest is the proof data.
 // e.g. assume proof is [0x01, 0x02, 0x03], then the encoded data is [0x00, 0x01, 0x02, 0x03]
-func (e *solanaProgram) encodeData(proof []byte) []byte {
+func (e *SolanaProgram) encodeData(proof []byte) []byte {
 	data := []byte{}
 	data = append(data, byte(0)) // 0 means submit proof
 	data = append(data, proof...)
 	return data
 }
 
-func (e *solanaProgram) packInstructions(proof []byte) []soltypes.Instruction {
+func (e *SolanaProgram) packInstructions(proof []byte) []soltypes.Instruction {
 	accounts := []soltypes.AccountMeta{}
 	if e.stateAccountPK != "" {
 		accounts = append(accounts, soltypes.AccountMeta{
@@ -101,7 +101,7 @@ func NewSolanaProgram(endpoint, programID, secretKey, stateAccountPK string) (Ou
 	if len(secretKey) == 0 {
 		return nil, errors.New("secretkey is empty")
 	}
-	return &solanaProgram{
+	return &SolanaProgram{
 		endpoint:       endpoint,
 		programID:      programID,
 		secretKey:      secretKey,

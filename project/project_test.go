@@ -13,6 +13,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 
+	"github.com/machinefi/sprout/output"
+	"github.com/machinefi/sprout/testutil"
 	"github.com/machinefi/sprout/types"
 	"github.com/machinefi/sprout/utils/ipfs"
 )
@@ -20,55 +22,211 @@ import (
 func TestConfig_GetOutput(t *testing.T) {
 	r := require.New(t)
 
-	t.Run("Default", func(t *testing.T) {
-		c := &Config{}
-		_, err := c.GetOutput("", "")
-		r.NoError(err)
-	})
-	t.Run("Stdout", func(t *testing.T) {
-		c := &Config{
-			Output: OutputConfig{
-				Type: types.OutputStdout,
-			},
-		}
-		_, err := c.GetOutput("", "")
-		r.NoError(err)
-	})
-	t.Run("Ethereum", func(t *testing.T) {
-		c := &Config{
-			Output: OutputConfig{
-				Type: types.OutputEthereumContract,
-				Ethereum: EthereumConfig{
-					ContractAbiJSON: `[{"constant":true,"inputs":[],"name":"getProof","outputs":[{"internalType":"bytes","name":"","type":"bytes"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"internalType":"bytes","name":"_proof","type":"bytes"}],"name":"setProof","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"}]`,
-				},
-			},
-		}
-		_, err := c.GetOutput("c47bbade736b0f82788aa6eaa06140cdf41a544707edef944299642e0d708cab", "")
-		r.NoError(err)
-	})
-	t.Run("Solana", func(t *testing.T) {
-		c := &Config{
-			Output: OutputConfig{
-				Type:   types.OutputSolanaProgram,
-				Solana: SolanaConfig{},
-			},
-		}
-		_, err := c.GetOutput("", "308edd7fca562182adbffaa59264a138d9e04f9f3adbda2c80ef1ca71b7dcfa4")
-		r.NoError(err)
-	})
-}
-
-func TestProjectMeta_GetConfigs_init(t *testing.T) {
-	r := require.New(t)
 	p := gomonkey.NewPatches()
 	defer p.Reset()
 
-	t.Run("InvalidUri", func(t *testing.T) {
-		p = p.ApplyFuncReturn(url.Parse, nil, errors.New(t.Name()))
+	p.ApplyFuncReturn(output.NewEthereum, &output.EthereumContract{}, nil)
+	p.ApplyFuncReturn(output.NewSolanaProgram, &output.SolanaProgram{}, nil)
+	p.ApplyFuncReturn(output.NewTextileDBAdapter, &output.TextileDB{}, nil)
+	p.ApplyFuncReturn(output.NewStdout, &output.Stdout{})
 
-		_, err := (&ProjectMeta{}).GetConfigs("")
-		r.ErrorContains(err, t.Name())
+	out, err := (&Config{Output: OutputConfig{Type: types.OutputEthereumContract}}).GetOutput("any", "any")
+	r.IsType(out, &output.EthereumContract{})
+	r.NoError(err)
+
+	out, err = (&Config{Output: OutputConfig{Type: types.OutputSolanaProgram}}).GetOutput("any", "any")
+	r.IsType(out, &output.SolanaProgram{})
+	r.NoError(err)
+
+	out, err = (&Config{Output: OutputConfig{Type: types.OutputTextile}}).GetOutput("any", "any")
+	r.IsType(out, &output.TextileDB{})
+	r.NoError(err)
+
+	out, err = (&Config{Output: OutputConfig{Type: types.OutputStdout}}).GetOutput("any", "any")
+	r.IsType(out, &output.Stdout{})
+	r.NoError(err)
+
+	out, err = (&Config{}).GetOutput("any", "any")
+	r.IsType(out, &output.Stdout{})
+	r.NoError(err)
+}
+
+type DummyHash struct {
+	bytes.Buffer
+}
+
+func (h *DummyHash) Sum(b []byte) []byte {
+	return b
+}
+
+func (h *DummyHash) Reset() {}
+
+func (h *DummyHash) Size() int { return 0 }
+
+func (h *DummyHash) BlockSize() int { return 0 }
+
+func TestProjectMeta_GetConfigs(t *testing.T) {
+	r := require.New(t)
+
+	t.Run("ParseURI", func(t *testing.T) {
+		t.Run("FailedToParseURL", func(t *testing.T) {
+			p := gomonkey.NewPatches()
+			defer p.Reset()
+
+			p = p.ApplyFuncReturn(url.Parse, nil, errors.New(t.Name()))
+
+			_, err := (&ProjectMeta{}).GetConfigs("")
+			r.ErrorContains(err, t.Name())
+		})
 	})
+
+	t.Run("FetchProjectConfigByURL", func(t *testing.T) {
+		t.Run("FailedToFetchProjectConfig", func(t *testing.T) {
+			t.Run("FromIPFS", func(t *testing.T) {
+				p := gomonkey.NewPatches()
+				defer p.Reset()
+
+				p = p.ApplyMethodReturn(&ipfs.IPFS{}, "Cat", nil, errors.New(t.Name()))
+
+				cases := []*struct {
+					Scheme string
+					Meta   *ProjectMeta
+				}{
+					{
+						Scheme: "URL",
+						Meta:   &ProjectMeta{Uri: "ipfs://ipfshost/endpoint/cid"},
+					},
+					{
+						Scheme: "RawCID",
+						Meta:   &ProjectMeta{Uri: "cid"},
+					},
+				}
+
+				for _, c := range cases {
+					configs, err := c.Meta.GetConfigs("any")
+					r.Len(configs, 0)
+					r.ErrorContains(err, t.Name())
+				}
+			})
+			t.Run("FromHTTP(s)", func(t *testing.T) {
+				t.Run("FailedToHTTPGet", func(t *testing.T) {
+					p := gomonkey.NewPatches()
+					defer p.Reset()
+
+					p = p.ApplyFuncReturn(http.Get, nil, errors.New(t.Name()))
+
+					configs, err := (&ProjectMeta{Uri: "http://ipfshost/endpoint/cid"}).GetConfigs("any")
+					r.Len(configs, 0)
+					r.ErrorContains(err, t.Name())
+				})
+
+				t.Run("FailedToReadHTTPRespondedBody", func(t *testing.T) {
+					p := gomonkey.NewPatches()
+					defer p.Reset()
+
+					p = p.ApplyFuncReturn(http.Get, &http.Response{
+						Body: io.NopCloser(bytes.NewReader([]byte("any"))),
+					}, nil)
+					p = p.ApplyFuncReturn(io.ReadAll, nil, errors.New(t.Name()))
+
+					configs, err := (&ProjectMeta{Uri: "http://ipfshost/endpoint/cid"}).GetConfigs("any")
+					r.Len(configs, 0)
+					r.ErrorContains(err, t.Name())
+				})
+			})
+		})
+	})
+
+	correcthash := [32]byte{1, 2, 3}
+	wronghash := [32]byte{3, 2, 1}
+	t.Run("CalAndCheckContentSHA256Sum", func(t *testing.T) {
+		pm := &ProjectMeta{
+			Uri:  "ipfs://ipfshost/cid",
+			Hash: correcthash,
+		}
+
+		t.Run("FailedToCalSum", func(t *testing.T) {
+			p := gomonkey.NewPatches()
+			defer p.Reset()
+
+			p = p.ApplyMethodReturn(&ipfs.IPFS{}, "Cat", []byte("any"), nil)
+			p = p.ApplyFuncReturn(sha256.New, &DummyHash{})
+			p = p.ApplyMethodReturn(&bytes.Buffer{}, "Write", 0, errors.New(t.Name()))
+
+			configs, err := pm.GetConfigs("any")
+			r.Len(configs, 0)
+			r.ErrorContains(err, t.Name())
+		})
+
+		t.Run("FailedToCheckSHA256Sum", func(t *testing.T) {
+			p := gomonkey.NewPatches()
+			defer p.Reset()
+
+			p = p.ApplyMethodReturn(&ipfs.IPFS{}, "Cat", []byte("any"), nil)
+			p = p.ApplyFuncReturn(sha256.New, &DummyHash{})
+			p = p.ApplyMethodReturn(&bytes.Buffer{}, "Write", 0, nil)
+			p = p.ApplyMethodReturn(&DummyHash{}, "Sum", wronghash[:])
+
+			configs, err := pm.GetConfigs("any")
+			r.Len(configs, 0)
+			r.ErrorContains(err, "validate project config hash failed")
+		})
+	})
+
+	t.Run("ParseAndValidateContent", func(t *testing.T) {
+		pm := &ProjectMeta{
+			Uri:  "ipfs://ipfshost/cid",
+			Hash: [32]byte{1, 2, 3},
+		}
+
+		p := gomonkey.NewPatches()
+		defer p.Reset()
+
+		p = p.ApplyMethodReturn(&ipfs.IPFS{}, "Cat", []byte("any"), nil)
+		p = p.ApplyFuncReturn(sha256.New, &DummyHash{})
+		p = p.ApplyMethodReturn(&bytes.Buffer{}, "Write", 0, nil)
+		p = p.ApplyMethodReturn(&DummyHash{}, "Sum", correcthash[:])
+
+		t.Run("FailedToJsonUnmarshalContent", func(t *testing.T) {
+			p = testutil.JsonUnmarshal2(p, nil, errors.New(t.Name()))
+
+			configs, err := pm.GetConfigs("any")
+			r.Len(configs, 0)
+			r.ErrorContains(err, t.Name())
+		})
+
+		t.Run("EmptyConfigs", func(t *testing.T) {
+			p = testutil.JsonUnmarshal2(p, &([]*Config{}), nil)
+
+			configs, err := pm.GetConfigs("any")
+			r.Len(configs, 0)
+			r.ErrorContains(err, "empty project config")
+		})
+
+		t.Run("InvalidConfig", func(t *testing.T) {
+			p = testutil.JsonUnmarshal2(p, &([]*Config{{
+				Code: "",
+			}}), nil)
+
+			configs, err := pm.GetConfigs("any")
+			r.Len(configs, 0)
+			r.ErrorContains(err, "invalid project config")
+		})
+
+		t.Run("Success", func(t *testing.T) {
+			p = testutil.JsonUnmarshal2(p, &([]*Config{{
+				Code:    "any",
+				VMType:  "any",
+				Version: "any",
+			}}), nil)
+
+			configs, err := pm.GetConfigs("any")
+			r.Len(configs, 1)
+			r.NoError(err)
+		})
+
+	})
+
 }
 
 func TestProjectMeta_GetConfigs_http(t *testing.T) {

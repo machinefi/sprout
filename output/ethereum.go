@@ -19,7 +19,7 @@ import (
 	"github.com/machinefi/sprout/types"
 )
 
-type ethereumContract struct {
+type EthereumContract struct {
 	chainEndpoint   string
 	contractAddress string
 	receiverAddress string
@@ -28,7 +28,7 @@ type ethereumContract struct {
 	contractMethod  string
 }
 
-func (e *ethereumContract) Output(task *types.Task, proof []byte) (string, error) {
+func (e *EthereumContract) Output(task *types.Task, proof []byte) (string, error) {
 	slog.Debug("outputing to ethereum contract", "chain endpoint", e.chainEndpoint)
 
 	method, ok := e.contractABI.Methods[e.contractMethod]
@@ -117,7 +117,7 @@ func (e *ethereumContract) Output(task *types.Task, proof []byte) (string, error
 	return txHash, nil
 }
 
-func (e *ethereumContract) sendTX(ctx context.Context, endpoint, privateKey, toStr string, data []byte) (string, error) {
+func (e *EthereumContract) sendTX(ctx context.Context, endpoint, privateKey, toStr string, data []byte) (string, error) {
 	cli, err := ethclient.Dial(endpoint)
 	if err != nil {
 		return "", errors.Wrapf(err, "dial eth endpoint %s failed", endpoint)
@@ -182,7 +182,7 @@ func NewEthereum(chainEndpoint, secretKey, contractAddress, receiverAddress, con
 	if len(secretKey) == 0 {
 		return nil, errors.New("secretkey is empty")
 	}
-	return &ethereumContract{
+	return &EthereumContract{
 		chainEndpoint:   chainEndpoint,
 		secretKey:       secretKey,
 		contractAddress: contractAddress,

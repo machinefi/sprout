@@ -19,6 +19,10 @@ import (
 	"github.com/machinefi/sprout/project/contracts"
 )
 
+var (
+	ErrInvalidProjectID = errors.New("invalid project id")
+)
+
 type Manager struct {
 	mux          sync.Mutex
 	pool         map[key]*Config
@@ -75,45 +79,44 @@ func (m *Manager) GetNotify() <-chan uint64 {
 	return m.notify
 }
 
-func (m *Manager) doProjectRegistrarWatch(logs <-chan *types.Log, subs event.Subscription) {
-	select {
-	case err := <-subs.Err():
-		slog.Error("project upserted event subscription failed", "err", err)
-	case l := <-logs:
-		ev, err := m.instance.ParseProjectUpserted(*l)
-		if err != nil {
-			slog.Error("failed to parse target event", "msg", err)
-			return
-		}
-		if ev.ProjectId == 0 {
-			return
-		}
-		pm := &ProjectMeta{
-			ProjectID: ev.ProjectId,
-			Uri:       ev.Uri,
-			Hash:      ev.Hash,
-		}
-		cs, err := pm.GetConfigs(m.ipfsEndpoint)
-		if err != nil {
-			slog.Error("fetch project failed", "err", err)
-			return
-		}
-
-		for _, c := range cs {
-			slog.Info("monitor project", "project_id", pm.ProjectID, "version", c.Version, "vm_type", c.VMType, "code_size", len(c.Code))
-			m.Set(pm.ProjectID, c.Version, c)
-		}
-		select {
-		case m.notify <- pm.ProjectID:
-		default:
-			slog.Info("project notify channel full", "project_id", pm.ProjectID)
-		}
+func (m *Manager) onContractEvent(l *types.Log) error {
+	ev, err := m.instance.ParseProjectUpserted(*l)
+	if err != nil {
+		return err
 	}
+	if ev.ProjectId == 0 {
+		return ErrInvalidProjectID
+	}
+	pm := &ProjectMeta{
+		ProjectID: ev.ProjectId,
+		Uri:       ev.Uri,
+		Hash:      ev.Hash,
+	}
+	cs, err := pm.GetConfigs(m.ipfsEndpoint)
+	if err != nil {
+		return err
+	}
+
+	for _, c := range cs {
+		slog.Info("monitor project", "project_id", pm.ProjectID, "version", c.Version, "vm_type", c.VMType, "code_size", len(c.Code))
+		m.Set(pm.ProjectID, c.Version, c)
+	}
+	m.notify <- pm.ProjectID
+	return nil
 }
 
-func (m *Manager) watchProjectRegistrar(logs <-chan *types.Log, subs event.Subscription) {
+func (m *Manager) watchProjectRegistrar(logs <-chan *types.Log, subs event.Subscription) error {
 	for {
-		m.doProjectRegistrarWatch(logs, subs)
+		select {
+		case err := <-subs.Err():
+			slog.Error("project upserted event subscription failed", "err", err)
+			return err
+		case l := <-logs:
+			if err := m.onContractEvent(l); err != nil {
+				slog.Error("failed to handle contract event", "error", err)
+			}
+			continue
+		}
 	}
 }
 
@@ -206,11 +209,6 @@ func (m *Manager) fillProjectPoolFromLocal(projectFileDir string) {
 			m.Set(projectID, c.Version, c)
 		}
 	}
-}
-
-func (m *Manager) fillProjectPool(projectFileDir string) {
-	m.fillProjectPoolFromContract()
-	m.fillProjectPoolFromLocal(projectFileDir)
 }
 
 func NewManager(chainEndpoint, contractAddress, projectFileDir, ipfsEndpoint string) (*Manager, error) {

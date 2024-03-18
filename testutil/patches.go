@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 
 	. "github.com/agiledragon/gomonkey/v2"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -23,6 +24,22 @@ func JsonUnmarshal(p *Patches, err error) *Patches {
 	return p.ApplyFunc(
 		json.Unmarshal,
 		func([]byte, any) error {
+			return err
+		},
+	)
+}
+
+func JsonUnmarshal2(p *Patches, inputmut any, err error) *Patches {
+	return p.ApplyFunc(
+		json.Unmarshal,
+		func(_ []byte, v any) error {
+			if inputmut != nil {
+				vi := reflect.ValueOf(inputmut)
+				vo := reflect.ValueOf(v)
+				if vi.IsValid() && vo.IsValid() {
+					vo.Elem().Set(vi.Elem())
+				}
+			}
 			return err
 		},
 	)
