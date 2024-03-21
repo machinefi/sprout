@@ -16,8 +16,13 @@ import (
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/pkg/errors"
 
+	"github.com/machinefi/sprout/p2p"
 	"github.com/machinefi/sprout/project/contracts"
 )
+
+func topic(projectID uint64) string {
+	return "w3bstream-project-" + strconv.FormatUint(projectID, 10)
+}
 
 type Manager struct {
 	mux          sync.Mutex
@@ -25,7 +30,7 @@ type Manager struct {
 	projectIDs   map[uint64]bool
 	instance     *contracts.Contracts
 	ipfsEndpoint string
-	notify       chan uint64
+	notify       chan *p2p.TopicEvent
 	cache        *cache
 	// znodes       []string
 	// ioID         string
@@ -72,7 +77,7 @@ func (m *Manager) GetAllProjectID() []uint64 {
 	return ids
 }
 
-func (m *Manager) GetNotify() <-chan uint64 {
+func (m *Manager) Subscribe() <-chan *p2p.TopicEvent {
 	return m.notify
 }
 
@@ -112,10 +117,16 @@ func (m *Manager) doProjectRegistrarWatch(logs <-chan *types.Log, subs event.Sub
 			m.cache.set(ev.ProjectId, data)
 		}
 
-		select {
-		case m.notify <- pm.ProjectID:
-		default:
-			slog.Info("project notify channel full", "project_id", pm.ProjectID)
+		if !pm.Paused {
+			m.notify <- &p2p.TopicEvent{
+				Topic: topic(pm.ProjectID),
+				Type:  p2p.TopicEventType_Upserted,
+			}
+		} else {
+			m.notify <- &p2p.TopicEvent{
+				Topic: topic(pm.ProjectID),
+				Type:  p2p.TopicEventType_Paused,
+			}
 		}
 	}
 }
@@ -247,7 +258,7 @@ func NewManager(chainEndpoint, contractAddress, projectFileDir, projectCacheDir,
 		pool:         make(map[key]*Config),
 		projectIDs:   make(map[uint64]bool),
 		ipfsEndpoint: ipfsEndpoint,
-		notify:       make(chan uint64, 32),
+		notify:       make(chan *p2p.TopicEvent, 32),
 		cache:        c,
 	}
 

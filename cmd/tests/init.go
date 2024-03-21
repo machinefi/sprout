@@ -17,6 +17,7 @@ import (
 	enodeconfig "github.com/machinefi/sprout/cmd/enode/config"
 	znodeconfig "github.com/machinefi/sprout/cmd/znode/config"
 	"github.com/machinefi/sprout/datasource"
+	"github.com/machinefi/sprout/p2p"
 	"github.com/machinefi/sprout/persistence"
 	"github.com/machinefi/sprout/project"
 	"github.com/machinefi/sprout/task"
@@ -115,12 +116,15 @@ func runZnode(conf *znodeconfig.Config) {
 		log.Fatal(err)
 	}
 
-	taskProcessor, err := task.NewProcessor(vmHandler, projectManager, conf.BootNodeMultiAddr, conf.IoTeXChainID)
+	taskProcessor, err := task.NewProcessor(vmHandler, projectManager)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	taskProcessor.Run()
+	_, err = p2p.NewPubSubs(projectManager, taskProcessor, conf.BootNodeMultiAddr, conf.IoTeXChainID)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	slog.Info("znode started")
 }
@@ -148,11 +152,17 @@ func runEnode(conf *enodeconfig.Config) {
 		log.Fatal(err)
 	}
 
-	dispatcher, err := task.NewDispatcher(pg, projectManager, datasource, conf.BootNodeMultiAddr, conf.OperatorPrivateKey, conf.OperatorPrivateKeyED25519, conf.IoTeXChainID)
+	dispatcher, err := task.NewDispatcher(pg, projectManager, conf.OperatorPrivateKey, conf.OperatorPrivateKeyED25519)
 	if err != nil {
 		log.Fatal(err)
 	}
-	go dispatcher.Dispatch(nextTaskID)
+
+	networking, err := p2p.NewPubSubs(projectManager, dispatcher, conf.BootNodeMultiAddr, conf.IoTeXChainID)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	go task.Dispatching(nextTaskID, datasource, networking)
 
 	go func() {
 		if err := api.NewHttpServer(pg, conf).Run(conf.ServiceEndpoint); err != nil {

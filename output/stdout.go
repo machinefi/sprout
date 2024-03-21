@@ -1,8 +1,6 @@
 package output
 
-import (
-	"log/slog"
-)
+import "log/slog"
 
 type stdout struct{}
 

@@ -6,58 +6,33 @@ import (
 	"time"
 
 	"github.com/agiledragon/gomonkey/v2"
-	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	pubsub_pb "github.com/libp2p/go-libp2p-pubsub/pb"
-	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
 
-type mockHost struct{ host.Host }
-
-func (h mockHost) ID() peer.ID {
-	return ""
-}
-
-func TestNewPubSubs(t *testing.T) {
+func Test_newSubscriber(t *testing.T) {
 	r := require.New(t)
 
-	var (
-		handle = func(data []byte, topic *pubsub.Topic) {}
-		_host  = &mockHost{}
-	)
-
-	t.Run("FailedToNewP2PHost", func(t *testing.T) {
+	t.Run("FailedToJoinTopic", func(t *testing.T) {
 		p := gomonkey.NewPatches()
 		defer p.Reset()
 
-		p = p.ApplyFuncReturn(libp2p.New, nil, errors.New(t.Name()))
+		p = p.ApplyMethodReturn(&pubsub.PubSub{}, "Join", nil, errors.New(t.Name()))
 
-		_, err := NewPubSubs(handle, "", 0)
-		r.ErrorContains(err, t.Name())
-	})
-	t.Run("FailedToNewGossip", func(t *testing.T) {
-		p := gomonkey.NewPatches()
-		defer p.Reset()
-
-		p = p.ApplyFuncReturn(libp2p.New, _host, nil)
-		p = p.ApplyFuncReturn(pubsub.NewGossipSub, nil, errors.New(t.Name()))
-
-		_, err := NewPubSubs(handle, "", 0)
+		_, err := newSubscriber("any", &pubsub.PubSub{}, nil, peer.ID("0"))
 		r.ErrorContains(err, t.Name())
 	})
 
-	t.Run("FailedToDiscovery", func(t *testing.T) {
+	t.Run("FailedToSubscribeTopic", func(t *testing.T) {
 		p := gomonkey.NewPatches()
 		defer p.Reset()
 
-		p = p.ApplyFuncReturn(libp2p.New, _host, nil)
-		p = p.ApplyFuncReturn(pubsub.NewGossipSub, &pubsub.PubSub{}, nil)
-		p = p.ApplyFuncReturn(discoverPeers, errors.New(t.Name()))
+		p = p.ApplyMethodReturn(&pubsub.PubSub{}, "Join", &pubsub.Topic{}, nil)
+		p = p.ApplyMethodReturn(&pubsub.Topic{}, "Subscribe", nil, errors.New(t.Name()))
 
-		_, err := NewPubSubs(handle, "", 0)
+		_, err := newSubscriber("any", &pubsub.PubSub{}, nil, peer.ID("0"))
 		r.ErrorContains(err, t.Name())
 	})
 
@@ -65,115 +40,18 @@ func TestNewPubSubs(t *testing.T) {
 		p := gomonkey.NewPatches()
 		defer p.Reset()
 
-		p = p.ApplyFuncReturn(libp2p.New, _host, nil)
-		p = p.ApplyFuncReturn(pubsub.NewGossipSub, nil, nil)
-		p = p.ApplyFuncReturn(discoverPeers, nil)
+		p = p.ApplyMethodReturn(&pubsub.PubSub{}, "Join", &pubsub.Topic{}, nil)
+		p = p.ApplyMethodReturn(&pubsub.Topic{}, "Subscribe", &pubsub.Subscription{}, nil)
 
-		_, err := NewPubSubs(handle, "any", 0)
+		_, err := newSubscriber("any", &pubsub.PubSub{}, nil, peer.ID("0"))
 		r.NoError(err)
 	})
 }
 
-func TestPubSubs_Add(t *testing.T) {
-	r := require.New(t)
-
-	ps := &PubSubs{pubSubs: map[uint64]*pubSub{1: {}}}
-
-	t.Run("ProjectIDAlreadyExists", func(t *testing.T) {
-		r.Nil(ps.Add(1))
-	})
-
-	t.Run("FailedToNewPubSub", func(t *testing.T) {
-		p := gomonkey.NewPatches()
-		defer p.Reset()
-
-		p = p.ApplyFunc(NewPubSub, func(uint64, *pubsub.PubSub, HandleSubscriptionMessage, peer.ID) (*pubSub, error) {
-			return nil, errors.New(t.Name())
-		})
-
-		err := ps.Add(2)
-		r.EqualError(err, t.Name())
-	})
-
-	t.Run("Success", func(t *testing.T) {
-		p := gomonkey.NewPatches()
-		defer p.Reset()
-
-		_ps := &pubSub{}
-		_ps.ctx, _ps.ctxCancel = context.WithCancel(context.Background())
-
-		times := -1
-
-		p = p.ApplyFuncReturn(NewPubSub, _ps, nil)
-		p = p.ApplyPrivateMethod(&pubSub{}, "nextMsg", func() error {
-			times++
-			time.Sleep(100 * time.Millisecond)
-			if times%2 == 0 {
-				return errors.New(t.Name())
-			}
-			return nil
-		})
-
-		err := ps.Add(3)
-		time.Sleep(time.Second)
-		_ps.ctxCancel()
-		time.Sleep(time.Second)
-		r.NoError(err)
-	})
-}
-
-func TestPubSubs_Delete(t *testing.T) {
-	ps := &PubSubs{
-		pubSubs: map[uint64]*pubSub{1: {ctxCancel: func() {}}},
-	}
-
-	t.Run("IDNotExist", func(t *testing.T) {
-		ps.Delete(101)
-	})
-
-	t.Run("Success", func(t *testing.T) {
-		p := gomonkey.NewPatches()
-		defer p.Reset()
-
-		p = p.ApplyFuncReturn(NewPubSub, &pubSub{}, nil)
-		p = p.ApplyPrivateMethod(&pubSub{}, "release", func(_ *pubSub) {})
-
-		ps.Delete(1)
-	})
-}
-
-func TestPubSubs_Publish(t *testing.T) {
-	r := require.New(t)
-
-	projectID := uint64(0x1)
-	ps := &PubSubs{pubSubs: map[uint64]*pubSub{1: {}}}
-	d := []byte("1")
-
-	t.Run("NotExist", func(t *testing.T) {
-		r.Error(ps.Publish(102, d))
-	})
-
-	t.Run("FailedToPublishData", func(t *testing.T) {
-		p := gomonkey.NewPatches()
-		defer p.Reset()
-
-		p = p.ApplyMethodReturn(&pubsub.Topic{}, "Publish", errors.New(t.Name()))
-		r.ErrorContains(ps.Publish(projectID, d), t.Name())
-	})
-
-	t.Run("Success", func(t *testing.T) {
-		p := gomonkey.NewPatches()
-		defer p.Reset()
-
-		p = p.ApplyMethodReturn(&pubsub.Topic{}, "Publish", nil)
-		r.NoError(ps.Publish(projectID, d))
-	})
-}
-
-func TestPubSub_Release(t *testing.T) {
-	ps := &pubSub{
+func Test_subscriber_release(t *testing.T) {
+	ps := &subscriber{
 		topic:        &pubsub.Topic{},
-		ctxCancel:    func() {},
+		cancel:       func() {},
 		subscription: &pubsub.Subscription{},
 	}
 
@@ -198,78 +76,61 @@ func TestPubSub_Release(t *testing.T) {
 	})
 }
 
-func TestPubSub_NextMsg(t *testing.T) {
-	r := require.New(t)
+type mockP2PDataHandler struct{}
 
-	ps := &pubSub{
-		selfID:       peer.ID("test01"),
-		subscription: &pubsub.Subscription{},
-		handle:       func(data []byte, topic *pubsub.Topic) {},
-	}
-
-	t.Run("FailedToGetP2PData", func(t *testing.T) {
-		p := gomonkey.NewPatches()
-		defer p.Reset()
-		p = p.ApplyMethodReturn(&pubsub.Subscription{}, "Next", nil, errors.New(t.Name()))
-		defer p.Reset()
-
-		err := ps.nextMsg()
-		r.ErrorContains(err, t.Name())
-	})
-
-	t.Run("GetP2pDataFromSelf", func(t *testing.T) {
-		p := gomonkey.NewPatches()
-		defer p.Reset()
-		p = p.ApplyMethodReturn(&pubsub.Subscription{}, "Next", &pubsub.Message{ReceivedFrom: ps.selfID}, nil)
-
-		err := ps.nextMsg()
-		r.NoError(err)
-	})
-
-	t.Run("Success", func(t *testing.T) {
-		p := gomonkey.NewPatches()
-		defer p.Reset()
-
-		p = p.ApplyMethodReturn(&pubsub.Subscription{}, "Next", &pubsub.Message{
-			ReceivedFrom: peer.ID("test02"),
-			Message:      &pubsub_pb.Message{Data: []byte("{}")},
-		}, nil)
-		r.Nil(ps.nextMsg())
-	})
+func (h *mockP2PDataHandler) Handle([]byte) [][]byte {
+	return nil
 }
 
-func TestNewPubSub(t *testing.T) {
-	r := require.New(t)
+func Test_subscriber_run(t *testing.T) {
+	p := gomonkey.NewPatches()
+	defer p.Reset()
 
-	t.Run("FailedToJoinTopic", func(t *testing.T) {
-		p := gomonkey.NewPatches()
-		defer p.Reset()
+	selfID := peer.ID("self")
+	ps := &subscriber{
+		selfID:       selfID,
+		topic:        &pubsub.Topic{},
+		subscription: &pubsub.Subscription{},
+		handler:      &mockP2PDataHandler{},
+	}
 
-		p = p.ApplyMethodReturn(&pubsub.PubSub{}, "Join", nil, errors.New(t.Name()))
+	t.Run("ContextDone", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
 
-		_, err := NewPubSub(uint64(0x1), &pubsub.PubSub{}, nil, peer.ID("0"))
-		r.ErrorContains(err, t.Name())
+		ps.run(ctx)
+		time.Sleep(time.Second)
 	})
 
-	t.Run("FailedToSubscribeTopic", func(t *testing.T) {
-		p := gomonkey.NewPatches()
-		defer p.Reset()
+	t.Run("SubscribeAndHandleMessage", func(t *testing.T) {
+		p = p.ApplyMethodSeq(&pubsub.Subscription{}, "Next", []gomonkey.OutputCell{
+			{
+				Values: gomonkey.Params{nil, errors.New("any")},
+				Times:  1,
+			},
+			{
+				Values: gomonkey.Params{&pubsub.Message{ReceivedFrom: selfID}, nil},
+				Times:  1,
+			},
+			{
+				Values: gomonkey.Params{&pubsub.Message{ReceivedFrom: "other"}, nil},
+				Times:  5,
+			},
+		})
 
-		p = p.ApplyMethodReturn(&pubsub.PubSub{}, "Join", &pubsub.Topic{}, nil)
-		p = p.ApplyMethodReturn(&pubsub.Topic{}, "Subscribe", nil, errors.New(t.Name()))
+		ctx, cancel := context.WithCancel(context.Background())
 
-		_, err := NewPubSub(uint64(0x1), &pubsub.PubSub{}, nil, peer.ID("0"))
-		r.ErrorContains(err, t.Name())
-	})
+		go func() {
+			time.Sleep(time.Millisecond * 300)
+			cancel()
+		}()
+		go func() {
+			defer func() {
+				t.Log(recover())
+			}()
+			ps.run(ctx)
+		}()
 
-	t.Run("Success", func(t *testing.T) {
-		p := gomonkey.NewPatches()
-		defer p.Reset()
-
-		p = p.ApplyMethodReturn(&pubsub.PubSub{}, "Join", &pubsub.Topic{}, nil)
-		p = p.ApplyMethodReturn(&pubsub.Topic{}, "Subscribe", &pubsub.Subscription{}, nil)
-
-		_, err := NewPubSub(uint64(0x1), &pubsub.PubSub{}, nil, peer.ID("0"))
-		r.NoError(err)
+		time.Sleep(time.Second)
 	})
 }

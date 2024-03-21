@@ -10,6 +10,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/machinefi/sprout/cmd/znode/config"
+	"github.com/machinefi/sprout/p2p"
 	"github.com/machinefi/sprout/project"
 	"github.com/machinefi/sprout/task"
 	"github.com/machinefi/sprout/vm"
@@ -48,12 +49,15 @@ func main() {
 		log.Fatal(err)
 	}
 
-	taskProcessor, err := task.NewProcessor(vmHandler, projectManager, conf.BootNodeMultiAddr, conf.IoTeXChainID)
+	taskProcessor, err := task.NewProcessor(vmHandler, projectManager)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	taskProcessor.Run()
+	_, err = p2p.NewPubSubs(projectManager, taskProcessor, conf.BootNodeMultiAddr, conf.IoTeXChainID)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)

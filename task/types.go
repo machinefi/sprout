@@ -1,6 +1,13 @@
 package task
 
-import "time"
+import (
+	"encoding/json"
+	"strconv"
+	"time"
+
+	"github.com/machinefi/sprout/project"
+	"github.com/machinefi/sprout/vm"
+)
 
 type Task struct {
 	ID             uint64   `json:"id"`
@@ -47,7 +54,39 @@ func (s TaskState) String() string {
 	}
 }
 
+func topic(projectID uint64) string {
+	return "w3bstream-project-" + strconv.FormatUint(projectID, 10)
+}
+
 type p2pData struct {
 	Task         *Task         `json:"task,omitempty"`
 	TaskStateLog *TaskStateLog `json:"taskStateLog,omitempty"`
+}
+
+func (p *p2pData) Unmarshal(data []byte) error {
+	return json.Unmarshal(data, p)
+}
+
+func (p *p2pData) Marshal() ([]byte, error) {
+	return json.Marshal(p)
+}
+
+type Datasource interface {
+	Retrieve(nextTaskID uint64) (*Task, error)
+}
+
+type Persistence interface {
+	Create(tl *TaskStateLog) error
+}
+
+type Networking interface {
+	Publish(topic string, data []byte) error
+}
+
+type ProjectPool interface {
+	Get(projectID uint64, version string) (*project.Config, error)
+}
+
+type ProofExecutor interface {
+	Handle(projectID uint64, vmtype vm.Type, code string, expParam string, data [][]byte) ([]byte, error)
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/machinefi/sprout/cmd/enode/api"
 	"github.com/machinefi/sprout/cmd/enode/config"
 	"github.com/machinefi/sprout/datasource"
+	"github.com/machinefi/sprout/p2p"
 	"github.com/machinefi/sprout/persistence"
 	"github.com/machinefi/sprout/project"
 	"github.com/machinefi/sprout/task"
@@ -34,6 +35,11 @@ func main() {
 		log.Fatal(err)
 	}
 
+	nextTaskID, err := persistence.FetchNextTaskID()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	_ = clients.NewManager()
 
 	projectManager, err := project.NewManager(conf.ChainEndpoint, conf.ProjectContractAddress, conf.ProjectFileDirectory, conf.ProjectCacheDirectory, conf.IPFSEndpoint)
@@ -46,16 +52,17 @@ func main() {
 		log.Fatal(err)
 	}
 
-	nextTaskID, err := persistence.FetchNextTaskID()
+	dispatcher, err := task.NewDispatcher(persistence, projectManager, conf.OperatorPrivateKey, conf.OperatorPrivateKeyED25519)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	dispatcher, err := task.NewDispatcher(persistence, projectManager, datasource, conf.BootNodeMultiAddr, conf.OperatorPrivateKey, conf.OperatorPrivateKeyED25519, conf.IoTeXChainID)
+	networking, err := p2p.NewPubSubs(projectManager, dispatcher, conf.BootNodeMultiAddr, conf.IoTeXChainID)
 	if err != nil {
 		log.Fatal(err)
 	}
-	go dispatcher.Dispatch(nextTaskID)
+
+	go task.Dispatching(nextTaskID, datasource, networking)
 
 	go func() {
 		if err := api.NewHttpServer(persistence, conf).Run(conf.ServiceEndpoint); err != nil {
